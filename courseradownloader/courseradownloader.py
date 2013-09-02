@@ -159,6 +159,9 @@ class CourseraDownloader(object):
 
         # for each weekly class
         for week in weeks:
+            # @note:vanos: add filter here if required
+            #if not("Week 2" in week): continue
+            #print "ivan:debug:", week
             h3 = week.findNext('h3')
             sanitisedHeaderName = sanitise_filename(h3.text)
             weeklyTopics.append(sanitisedHeaderName)
@@ -375,10 +378,14 @@ class CourseraDownloader(object):
                 classResources = weekClasses[className]
 
                 # ensure the class dir exists
-                clsdirname = str(i).zfill(2) + " - " + className
-                clsdir = path.join(wkdir,clsdirname)
-                if not path.exists(clsdir): 
-                    os.makedirs(clsdir)
+                # @hack:vanos: do not create a separate directory for each class
+                if True:
+                    clsdir = wkdir
+                else:
+                    clsdirname = str(i).zfill(2) + " - " + className
+                    clsdir = path.join(wkdir,clsdirname)
+                    if not path.exists(clsdir):
+                        os.makedirs(clsdir)
 
                 print "  - Downloading resources for " + className
 
