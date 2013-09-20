@@ -1,11 +1,9 @@
 import re
 import urllib
 import urllib2
-from urlparse import urlsplit
 import argparse
+import json
 import os
-import errno
-import unicodedata
 import getpass
 import netrc
 import mechanize
@@ -13,9 +11,12 @@ import cookielib
 from bs4 import BeautifulSoup
 import tempfile
 from os import path
+import tarfile
 import platform
 import sys
+from util import *
 import _version
+import shutil
 
 class CourseraDownloader(object):
     """
@@ -36,6 +37,7 @@ class CourseraDownloader(object):
     QUIZ_URL =    BASE_URL + '/quiz/index'
     AUTH_URL =    BASE_URL + "/auth/auth_redirector?type=login&subtype=normal"
     LOGIN_URL =   "https://accounts.coursera.org/api/v1/login"
+    ABOUT_URL =   "https://www.coursera.org/maestro/api/topic/information?topic-id=%s"
 
     #see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser
     DEFAULT_PARSER = "html.parser"
@@ -43,7 +45,15 @@ class CourseraDownloader(object):
     # how long to try to open a URL before timing out
     TIMEOUT=60.0
 
-    def __init__(self,username,password,proxy=None,parser=DEFAULT_PARSER,ignorefiles=None, max_path_len=None):
+
+    def __init__(self,username,
+                        password,
+                        proxy=None,
+                        parser=DEFAULT_PARSER,
+                        ignorefiles=None, 
+                        max_path_part_len=None,
+                        gzip_courses = False):
+
         self.username = username
         self.password = password
         self.parser = parser
@@ -55,13 +65,13 @@ class CourseraDownloader(object):
 
         self.browser = None
         self.proxy = proxy
-        self.max_path_len = max_path_len
+        self.max_path_part_len = max_path_part_len
+        self.gzip_courses = gzip_courses
 
     def login(self,className):
         """
-        Automatically generate a cookie file for the coursera site.
+        Login into coursera and obtain the necessary session cookies.
         """
-        #TODO: use proxy here
         hn,fn = tempfile.mkstemp()
         cookies = cookielib.LWPCookieJar()
         handlers = [
@@ -69,6 +79,12 @@ class CourseraDownloader(object):
             urllib2.HTTPSHandler(),
             urllib2.HTTPCookieProcessor(cookies)
         ]
+
+        # prepend a proxy handler if defined
+        if(self.proxy):
+            proxy = urllib2.ProxyHandler({'http': self.proxy})
+            handlers = [proxy] + handlers
+
         opener = urllib2.build_opener(*handlers)
 
         url = self.lecture_url_from_name(className)
@@ -137,9 +153,19 @@ class CourseraDownloader(object):
         """Given the name of a course, return the video lecture url"""
         return self.LECTURE_URL % course_name
 
+    #TODO: simple hack, something more elaborate needed
+    def trim_path_part(self,s):
+        mppl = self.max_path_part_len
+        if mppl and len(s) > mppl:
+            return s[:mppl-3] + "..."
+        else:
+            return s
+
     def get_downloadable_content(self,course_url):
-        """Given the video lecture URL of the course, return a list of all
-        downloadable resources."""
+        """
+        Given the video lecture URL of the course, return a list of all
+        downloadable resources.
+        """
 
         cname = self.course_name_from_url(course_url)
 
@@ -155,24 +181,26 @@ class CourseraDownloader(object):
         weeks = soup.findAll("div", { "class" : "course-item-list-header" })
 
         weeklyTopics = []
-        allClasses = {}
 
         # for each weekly class
         for week in weeks:
             # @note:vanos: add filter here if required
             #if not("Week 2" in week): continue
             #print "ivan:debug:", week
+            # title of this weeks' classes
             h3 = week.findNext('h3')
-            sanitisedHeaderName = sanitise_filename(h3.text)
-            weeklyTopics.append(sanitisedHeaderName)
+            weekTopic = sanitise_filename(h3.text)
+            weekTopic = self.trim_path_part(weekTopic)
+
+            # get all the classes for the week
             ul = week.next_sibling
             lis = ul.findAll('li')
-            weekClasses = {}
+            weekClasses = []
 
-            # for each lecture in a weekly class
+            # for each class (= lecture)
             classNames = []
             for li in lis:
-                # the name of this lecture/class
+                # the name of this class
                 className = li.a.find(text=True).strip()
 
                 # Many class names have the following format: 
@@ -184,18 +212,16 @@ class CourseraDownloader(object):
                     className = head  + "-" + tail
 
                 className = sanitise_filename(className)
-                classNames.append(className)
+                className = self.trim_path_part(className)
+
+                # collect all the resources for this class (ppt, pdf, mov, ..)
                 classResources = li.find('div', {'class':'course-lecture-item-resource'})
-
                 hrefs = classResources.findAll('a')
-
-                # collect the resources for a particular lecture (slides, pdf,
-                # links,...)
                 resourceLinks = []
 
                 for a in hrefs:
                     # get the hyperlink itself
-                    h = a.get('href')
+                    h = clean_url(a.get('href'))
                     if not h: continue
 
                     # Sometimes the raw, uncompresed source videos are available as
@@ -213,7 +239,7 @@ class CourseraDownloader(object):
                 hasvid = [x for x,_ in resourceLinks if x.find('.mp4') > 0]
                 if not hasvid:
                     ll = li.find('a',{'class':'lecture-link'})
-                    lurl = ll['data-modal-iframe']
+                    lurl = clean_url(ll['data-modal-iframe'])
 
                     try:
                         pg = self.browser.open(lurl,timeout=self.TIMEOUT)
@@ -224,7 +250,7 @@ class CourseraDownloader(object):
                         if not vobj:
                             print " Warning: Failed to find video for %s" %  className
                         else:
-                            vurl = vobj['src']
+                            vurl = clean_url(vobj['src'])
                             # build the matching filename
                             fn = className + ".mp4"
                             resourceLinks.append( (vurl,fn) )
@@ -234,14 +260,11 @@ class CourseraDownloader(object):
                         # genes-001) so this can happen.
                         print " Warning: failed to open the direct video link %s: %s" % (lurl,e)
 
-                weekClasses[className] = resourceLinks
+                weekClasses.append( (className,resourceLinks) )
 
-            # keep track of the list of classNames in the order they appear in the html
-            weekClasses['classNames'] = classNames
+            weeklyTopics.append( (weekTopic, weekClasses) )
 
-            allClasses[sanitisedHeaderName] = weekClasses
-
-        return (weeklyTopics, allClasses)
+        return weeklyTopics
 
     def get_headers(self,url):
         """
@@ -273,9 +296,6 @@ class CourseraDownloader(object):
             return
 
         filepath = path.join(target_dir,fname)
-
-        if self.max_path_len:
-            filepath = trim_path(filepath,max_path_len=self.max_path_len)
 
         dl = True
         if path.exists(filepath):
@@ -311,9 +331,29 @@ class CourseraDownloader(object):
         except Exception as e:
             print "Failed to download url %s to %s: %s" % (url,filepath,e)
 
-    def download_course(self,cname,dest_dir=".",reverse_sections=False):
+    def download_about(self, cname, course_dir):
         """
-        Download all the contents (quizzes, videos, lecture notes, ...) of the course to the given destination directory (defaults to .)
+        Download the 'about' json file
+        """
+        fn = os.path.join(course_dir, cname + '-about.json')
+
+        # get the base course name (without the -00x suffix)
+        base_name = cname[:cname.rindex('-')]
+
+        # get the json
+        about_url = self.ABOUT_URL % base_name
+        about_json = self.browser.open(about_url,timeout=self.TIMEOUT).read()
+        data = json.loads(about_json)
+
+        # pretty print to file
+        with open(fn, 'w') as f:
+            json_data = json.dumps(data, indent=4, separators=(',', ':'))
+            f.write(json_data)
+
+    def download_course(self,cname,dest_dir=".",reverse_sections=False,gzip_courses=False):
+        """
+        Download all the contents (quizzes, videos, lecture notes, ...)
+        of the course to the given destination directory (defaults to .)
         """
         # open the main class page
         self.browser.open(self.AUTH_URL % cname,timeout=self.TIMEOUT)
@@ -321,7 +361,7 @@ class CourseraDownloader(object):
         # get the lecture url
         course_url = self.lecture_url_from_name(cname)
 
-        (weeklyTopics, allClasses) = self.get_downloadable_content(course_url)
+        weeklyTopics = self.get_downloadable_content(course_url)
 
         if not weeklyTopics:
             print " Warning: no downloadable content found for %s, did you accept the honour code?" % cname
@@ -331,51 +371,40 @@ class CourseraDownloader(object):
 
         if reverse_sections:
             weeklyTopics.reverse()
-            print "* Sections reversed"
+            print "* Weekly modules reversed"
 
+        # where the course will be downloaded to
         course_dir = path.abspath(path.join(dest_dir,cname))
 
-        # ensure the target dir exists
-        if not path.exists(course_dir):
-            os.mkdir(course_dir)
-
-        print "* " + cname + " will be downloaded to " + course_dir
-
-        # ensure the course directory exists
+        # ensure the course dir exists
         if not path.exists(course_dir):
             os.makedirs(course_dir)
+
+        print "* " + cname + " will be downloaded to " + course_dir
 
         # download the standard pages
         print " - Downloading lecture/syllabus pages"
         self.download(self.HOME_URL % cname,target_dir=course_dir,target_fname="index.html")
-        self.download(course_url,target_dir=course_dir,target_fname="lectures.html")
+        self.download(course_url,           target_dir=course_dir,target_fname="lectures.html")
+        self.download_about(cname,course_dir)
 
         # now download the actual content (video's, lecture notes, ...)
-        for j,weeklyTopic in enumerate(weeklyTopics,start=1):
-            if weeklyTopic not in allClasses:
-                #TODO: refactor
-                print 'Warning: Weekly topic not in all classes:', weeklyTopic
-                continue
+        for j, (weeklyTopic, weekClasses) in enumerate(weeklyTopics,start=1):
 
-            # ensure the week dir exists
             # add a numeric prefix to the week directory name to ensure chronological ordering
             wkdirname = str(j).zfill(2) + " - " + weeklyTopic
+
+            # ensure the week dir exists
             wkdir = path.join(course_dir,wkdirname)
             if not path.exists(wkdir):
                 os.makedirs(wkdir)
 
-            weekClasses = allClasses[weeklyTopic]
-            classNames = weekClasses['classNames']
-
             print " - " + weeklyTopic
 
-            for i,className in enumerate(classNames,start=1):
-                if className not in weekClasses:
-                    #TODO: refactor
-                    print "Warning:",className,"not in",weekClasses.keys()
-                    continue
+            for i, (className, classResources) in enumerate(weekClasses,start=1):
 
-                classResources = weekClasses[className]
+                # ensure chronological ordering
+                clsdirname = str(i).zfill(2) + " - " + className
 
                 # ensure the class dir exists
                 # @hack:vanos: do not create a separate directory for each class
@@ -389,167 +418,23 @@ class CourseraDownloader(object):
 
                 print "  - Downloading resources for " + className
 
+                # download each resource
                 for classResource,tfname in classResources:
-                    if not isValidURL(classResource):
-                        absoluteURLGen = AbsoluteURLGen(course_url)
-                        classResource = absoluteURLGen.get_absolute(classResource)
-                        print "  -" + classResource, ' - is not a valid url'
-
-                        if not isValidURL(classResource):
-                            print "  -" + classResource, ' - is not a valid url'
-                            continue
-
                     try:
                        #print '  - Downloading ', classResource
                        self.download(classResource,target_dir=clsdir,target_fname=tfname)
                     except Exception as e:
                        print "    - failed: ",classResource,e
+        if gzip_courses:
+            tar_file_name = cname + ".tar.gz"
+            print "Compressing and storing as " + tar_file_name
+            tar = tarfile.open(os.path.join(dest_dir, tar_file_name),'w:gz')
+            tar.add(os.path.join(dest_dir, cname),arcname=cname)
+            tar.close()
+            print "Compression complete. Cleaning up."
+            shutil.rmtree(os.path.join(dest_dir, cname))
 
 
-def filename_from_header(header):
-    try:
-        cd = header['Content-Disposition']
-        pattern = 'attachment; filename="(.*?)"'
-        m = re.search(pattern, cd)
-        g = m.group(1)
-        return sanitise_filename(g)
-    except Exception:
-        return ''
-
-def filename_from_url(url):
-    # parse the url into its components
-    u = urlsplit(url)
-
-    # split the path into parts and unquote
-    parts = [urllib2.unquote(x).strip() for x in u.path.split('/')]
-
-    # take the last component as filename
-    fname = parts[-1]
-
-    # if empty, url ended with a trailing slash
-    # so join up the hostnam/path  and use that as a filename
-    if len(fname) < 1:
-        s = u.netloc + u.path[:-1]
-        fname = s.replace('/','_')
-    else:
-        # unquoting could have cuased slashes to appear again
-        # split and take the last element if so
-        fname = fname.split('/')[-1]
-
-    # add an extension if none
-    ext = path.splitext(fname)[1]
-    if len(ext) < 1 or len(ext) > 5: fname += ".html"
-
-    # remove any illegal chars and return
-    return sanitise_filename(fname)
-
-def sanitise_filename(fileName):
-    # ensure a clean, valid filename (arg may be both str and unicode)
-
-    # ensure a unicode string, problematic ascii chars will get removed
-    if isinstance(fileName,str):
-        fn = unicode(fileName,errors='ignore')
-    else:
-        fn = fileName
-
-    # normalize it
-    fn = unicodedata.normalize('NFKD',fn)
-
-    # encode it into ascii, again ignoring problematic chars
-    s = fn.encode('ascii','ignore')
-
-    # remove any characters not in the whitelist
-    s = re.sub('[^\w\-\(\)\[\]\., ]','',s).strip()
-
-    # ensure it is within a sane maximum
-    max = 250
-
-    # split off extension, trim, and re-add the extension
-    fn,ext = path.splitext(s)
-    s = fn[:max-len(ext)] + ext
-
-    return s
-    
-def trim_path(pathname, max_path_len=255, min_len=5):
-    """
-    Trim file name in given path name to fit max_path_len characters. Only file name is trimmed,
-    path names are not affected to avoid creating multiple folders for the same lecture.
-    """
-    if len(pathname) <= max_path_len:
-        return pathname
-
-    fpath, name = path.split(pathname)
-    name, ext = path.splitext(name)
-
-    to_cut = len(pathname) - max_path_len
-    to_keep = len(name) - to_cut
-
-    if to_keep < min_len:
-        print ' Warning: Cannot trim filename "%s" to fit required path length (%d)' % (pathname, max_path_len)
-        return pathname
-
-    name = name[:to_keep]
-    new_pathname = path.join(fpath, name + ext)
-    print ' Trimmed path name "%s" to "%s" to fit required length (%d)' % (pathname, new_pathname, max_path_len)
-
-    return new_pathname
-
-
-# TODO: simplistic
-def isValidURL(url):
-    return url.startswith('http') or url.startswith('https')
-
-# TODO: is this really still needed
-class AbsoluteURLGen(object):
-    """
-    Generate absolute URLs from relative ones
-    Source: AbsoluteURLGen copy pasted from http://www.python-forum.org/pythonforum/viewtopic.php?f=5&t=12515
-    """
-    def __init__(self, base='', replace_base=False):
-        self.replace_base = replace_base
-        self.base_regex = re.compile('^(https?://)(.*)$')
-        self.base = self.normalize_base(base)
-   
-    def normalize_base(self, url):
-        base = url
-        if self.base_regex.search(base):
-            # rid thyself of 'http(s)://'
-            base = self.base_regex.search(url).group(2)
-            if not base.rfind('/') == -1:
-                # keep only the directory, not the filename
-                base = base[:base.rfind('/')+1]
-            base = self.base_regex.search(url).group(1) + base
-        return base
-
-    def get_absolute(self, url=''):
-        if not self.base or (
-                self.replace_base and self.base_regex.search(url)):
-            self.base = self.normalize_base(url)
-            return url
-        elif self.base_regex.search(url):
-            # it's an absolute url, but we don't want to keep it's base
-            return url
-        else:
-            # now, it's time to do some converting.
-            if url.startswith("../"):
-                # they want the parent dir
-                if not self.base[:-2].rfind("/") == -1:
-                    base = self.base[:self.base[:-2].rfind("/")+1]
-                    return base + url[3:]
-                else:
-                    # there are no subdirs... broken link?
-                    return url
-            elif url.startswith("/"):
-                # file is in the root dir
-                protocol, base = self.base_regex.search(self.base).groups()
-                # remove subdirs until we're left with the root
-                while not base[:-2].rfind("/") == -1:
-                    base = base[:base[:-2].rfind('/')]
-                return protocol + base + url
-            else:
-                if url.startswith("./"):
-                    url = url[2:]
-                return self.base + url
 
 def get_netrc_creds():
     """
@@ -592,7 +477,6 @@ def get_netrc_creds():
 def normalize_string(str):
     return ''.join(x for x in str if x not in ' \t-_()"01234567890').lower()
 
-
 def find_renamed(filename, size):
     fpath, name = path.split(filename)
     name, ext = path.splitext(name)
@@ -628,7 +512,10 @@ def main():
                         default=False, help="download and save the sections in reverse order")
     parser.add_argument('course_names', nargs="+", metavar='<course name>',
                         type=str, help='one or more course names from the url (e.g., comnets-2012-001)')
-    parser.add_argument("--trim-path", dest='trim_path', action='store_true', default=True, help='Trim path names to fit OS constraints (windows only)')
+    parser.add_argument("--gz",
+                        dest='gzip_courses',action="store_true",default=False,help='Tarball courses for archival storage (folders get deleted)')
+    parser.add_argument("-mppl", dest='mppl', type=int, default=100,
+                        help='Maximum length of filenames/dirs in a path (windows only)')
     args = parser.parse_args()
 
     # check the parser
@@ -652,17 +539,26 @@ def main():
             password = getpass.getpass()
 
     # should we be trimming paths?
-    max_path_len = None
-    if args.trim_path:
+    #TODO: this is a simple hack, something more elaborate needed
+    mppl = None
+    if args.mppl:
         if platform.system() == "Windows":
-            max_path_len = 257
-            print "Maximum path length set to %s" % max_path_len
+            mppl = 90
+            print "Maximum length of a path component set to %s" % mppl
         else:
             # linux max path length is typically around 4060 so assume thats ok
-            pass   
+            pass
  
     # instantiate the downloader class
-    d = CourseraDownloader(username,password,proxy=args.proxy,parser=html_parser,ignorefiles=args.ignorefiles,max_path_len=max_path_len)
+    d = CourseraDownloader(
+                           username,
+                           password,
+                           proxy=args.proxy,
+                           parser=html_parser,
+                           ignorefiles=args.ignorefiles,
+                           max_path_part_len=mppl,
+                           gzip_courses=args.gzip_courses
+                          )
 
     # authenticate, only need to do this once but need a classaname to get hold
     # of the csrf token, so simply pass the first one
@@ -673,7 +569,7 @@ def main():
     for i,cn in enumerate(args.course_names,start=1):
         print
         print "Course %s of %s" % (i,len(args.course_names))
-        d.download_course(cn,dest_dir=args.dest_dir,reverse_sections=args.reverse)
+        d.download_course(cn,dest_dir=args.dest_dir,reverse_sections=args.reverse,gzip_courses = args.gzip_courses)
 
 if __name__ == '__main__':
     main()

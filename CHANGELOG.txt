@@ -1,3 +1,11 @@
+* 1.5 - Fri 13 Sep
+	- code cleanups
+	- fixed proxy support
+	- added option to automatically gzip courses
+	- crash less on long filenames on windows
+	- also download about json file
+	- small bugfixes
+
 * 1.4.11 - Fri 23 Aug
 	- update to new coursera authentication details
 
