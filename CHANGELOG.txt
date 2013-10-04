@@ -1,3 +1,6 @@
+* 1.5.1 - 
+	- commandline parameter for selecting weeks
+
 * 1.5 - Fri 13 Sep
 	- code cleanups
 	- fixed proxy support

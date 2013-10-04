@@ -52,7 +52,8 @@ class CourseraDownloader(object):
                         parser=DEFAULT_PARSER,
                         ignorefiles=None, 
                         max_path_part_len=None,
-                        gzip_courses = False):
+                        gzip_courses=False,
+                        wk_filter=None):
 
         self.username = username
         self.password = password
@@ -67,6 +68,12 @@ class CourseraDownloader(object):
         self.proxy = proxy
         self.max_path_part_len = max_path_part_len
         self.gzip_courses = gzip_courses
+        
+        try:
+            self.wk_filter = map(int,wk_filter.split(",")) if wk_filter else None
+        except Exception as e:
+            print "Invalid week filter, should be a comma separated list of integers", e
+            exit()
 
     def login(self,className):
         """
@@ -338,7 +345,7 @@ class CourseraDownloader(object):
         fn = os.path.join(course_dir, cname + '-about.json')
 
         # get the base course name (without the -00x suffix)
-        base_name = cname[:cname.rindex('-')]
+        base_name = re.split('(-[0-9]+)', cname)[0]
 
         # get the json
         about_url = self.ABOUT_URL % base_name
@@ -390,6 +397,11 @@ class CourseraDownloader(object):
 
         # now download the actual content (video's, lecture notes, ...)
         for j, (weeklyTopic, weekClasses) in enumerate(weeklyTopics,start=1):
+
+
+            if self.wk_filter and j not in self.wk_filter:
+                print " - skipping %s (idx = %s), as it is not in the week filter" % (weeklyTopic,j)
+                continue
 
             # add a numeric prefix to the week directory name to ensure chronological ordering
             wkdirname = str(j).zfill(2) + " - " + weeklyTopic
@@ -516,6 +528,7 @@ def main():
                         dest='gzip_courses',action="store_true",default=False,help='Tarball courses for archival storage (folders get deleted)')
     parser.add_argument("-mppl", dest='mppl', type=int, default=100,
                         help='Maximum length of filenames/dirs in a path (windows only)')
+    parser.add_argument("-w", dest='wkfilter', type=str, default=None, help="Comma separted list of week numbers to download e.g., 1,3,8")
     args = parser.parse_args()
 
     # check the parser
@@ -557,7 +570,8 @@ def main():
                            parser=html_parser,
                            ignorefiles=args.ignorefiles,
                            max_path_part_len=mppl,
-                           gzip_courses=args.gzip_courses
+                           gzip_courses=args.gzip_courses,
+                           wk_filter=args.wkfilter
                           )
 
     # authenticate, only need to do this once but need a classaname to get hold
