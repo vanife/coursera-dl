@@ -1,5 +1,7 @@
-* 1.5.1 - 
+* 1.5.1 - Sat 5 Oct
 	- commandline parameter for selecting weeks
+	- filename fix following coursera updatex
+	- correctly handle courses with hyphens in the name
 
 * 1.5 - Fri 13 Sep
 	- code cleanups

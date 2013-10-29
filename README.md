@@ -6,6 +6,10 @@ lecture notes, quizzes, …) for offline reference. Originally forked from
 [https://github.com/abhirama/coursera-download][] but significantly
 cleaned up and enhanced.
 
+Some people have asked if they could donate something. If you wish you can do so here:
+
+[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=A6HCYM6JBJY5N&lc=US&item_name=Dirk%20Gorissen&currency_code=GBP&bn=PP%2dDonationsBF%3abtn_donate_LG%2egif%3aNonHosted)
+
 Installation
 ------------
 

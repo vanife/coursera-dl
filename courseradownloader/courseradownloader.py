@@ -399,7 +399,10 @@ class CourseraDownloader(object):
         print " - Downloading lecture/syllabus pages"
         self.download(self.HOME_URL % cname,target_dir=course_dir,target_fname="index.html")
         self.download(course_url,           target_dir=course_dir,target_fname="lectures.html")
-        self.download_about(cname,course_dir)
+        try:
+            self.download_about(cname,course_dir)
+        except Exception as e:
+            print "Warning: failed to download about file",e
 
         # now download the actual content (video's, lecture notes, ...)
         for j, (weeklyTopic, weekClasses) in enumerate(weeklyTopics,start=1):
