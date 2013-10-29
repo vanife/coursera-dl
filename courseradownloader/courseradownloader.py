@@ -228,7 +228,13 @@ class CourseraDownloader(object):
 
                 for a in hrefs:
                     # get the hyperlink itself
-                    h = clean_url(a.get('href'))
+                    def _clean_url(url):
+                        if not url: return None
+                        url = url.strip()
+                        if url and not urlparse(url).scheme:
+                            url = 'https://class.coursera.org' + url
+                        return url
+                    h = _clean_url(a.get('href'))
                     if not h: continue
 
                     # Sometimes the raw, uncompresed source videos are available as
@@ -587,3 +593,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
