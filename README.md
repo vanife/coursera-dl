@@ -13,36 +13,41 @@ Some people have asked if they could donate something. If you wish you can do so
 Installation
 ------------
 
-Make sure you have installed [Python][] 2.7 and [pip][].
+Make sure you have installed [Python][] and [pip][].
 
-Then simply run: pip install coursera-dl
+Then simply run: `pip install coursera-dl`
 
-This will create a coursera-dl script in /usr/local/bin (linux) or
-c:\\Python2.7\\Scripts (windows)
+Depending on your setup this will create a `coursera-dl` script in `/usr/local/bin` (linux) or
+`c:\\Python2.7\\Scripts` (windows)
 
-(to upgrade use pip install --upgrade)
+(to upgrade use `pip install --upgrade`)
 
 Usage
 -----
 
-See: coursera-dl -h
+See: `coursera-dl -h`
 
 Example usage:
 
 <pre>
-coursera-dl -u myusername -p mypassword -d /my/coursera/courses/ algo-2012-001 ml-2012-002
+$ coursera-dl -u MYUSERNAME -p MYPASSWORD -d MYPATH algo-2012-001 ml-2012-002
 </pre>
 
-Note: you can also specify your login and password in .netrc file in your home directory.
-Just add this line to ~/.netrc
+Note: you can also specify your login and password in `.netrc` file in your home directory.
+Just add this line to `~/.netrc`
 <pre>
-machine coursera-dl login myusername password mypassword
+machine coursera-dl login MYUSERNAME password MYPASSWORD
+</pre>
+
+Then set the permission of `~/.netrc` to `600` (owner can read and write).
+<pre>
+$ chmod 600 ~/.netrc
 </pre>
 
 Now you can use coursera-dl like this:
 
 <pre>
-coursera-dl -d /my/coursera/courses/ algo-2012-001 ml-2012-002
+$ coursera-dl -d MYPATH algo-2012-001 ml-2012-002
 </pre>
 
 Note: ensure you have accepted the honor code of the class before using

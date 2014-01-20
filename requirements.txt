@@ -1,4 +1,4 @@
-beautifulsoup4
-mechanize
 argparse
-
+beautifulsoup4
+requests
+six
