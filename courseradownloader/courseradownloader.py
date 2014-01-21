@@ -124,7 +124,7 @@ class CourseraDownloader(object):
     def trim_path_part(self, s):
         mppl = self.max_path_part_len
         if mppl and len(s) > mppl:
-            return s[:mppl - 3] + "..."
+            return s[:mppl - 3] + "___"
         else:
             return s
 
@@ -192,8 +192,9 @@ class CourseraDownloader(object):
         # for each weekly class
         for week in weeks:
             # @note:vanos: add filter here if required
-            #if not("Week 2" in week): continue
+            #if not("Week 9" in str(week)): continue
             #print "ivan:debug:", week
+
             # title of this weeks' classes
             h3 = week.findNext('h3')
 
