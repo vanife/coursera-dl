@@ -2,7 +2,7 @@ coursera-dl
 ===========
 
 A python package for archiving content from coursera.org (videos,
-lecture notes, quizzes, …) for offline reference. Originally forked from
+lecture notes, ...) for offline reference. Originally forked from
 [https://github.com/abhirama/coursera-download][] but significantly
 cleaned up and enhanced.
 
