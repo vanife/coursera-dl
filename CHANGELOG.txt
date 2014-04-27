@@ -1,3 +1,6 @@
+* 2.0.1 - Tue 11 Mar 2014
+	- fix mppl behavior
+
 * 2.0.0 - Fri 7 Mar 2014
 	- replace dependency on mechanize by requests & six
 	- make compatible with python 3
