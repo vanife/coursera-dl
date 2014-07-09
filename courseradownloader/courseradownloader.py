@@ -96,7 +96,7 @@ class CourseraDownloader(object):
             raise Exception("Failed to find csrf cookie")
 
         # call the authenticator url
-        LOGIN_FORM = {'email': self.username, 'password': self.password}
+        LOGIN_FORM = {'email': self.username, 'password': self.password, 'webrequest':'true'}
         s.headers['Referer'] = 'https://www.coursera.org'
         s.headers['X-CSRFToken'] = s.cookies.get('csrf_token')
         s.cookies['csrftoken'] = s.cookies.get('csrf_token')
