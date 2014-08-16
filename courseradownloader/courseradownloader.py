@@ -31,6 +31,7 @@ class CourseraDownloader(object):
     :keyword proxy: http proxy, eg: foo.bar.com:1234
     :keyword parser: xml parser
     :keyword ignorefiles: comma separated list of file extensions to skip (e.g., "ppt,srt")
+    :keyword clobber: allow re-downloading of existing files
     """
     BASE_URL = 'https://class.coursera.org/%s'
     HOME_URL = BASE_URL + '/class/index'
@@ -52,6 +53,7 @@ class CourseraDownloader(object):
                  proxy=None,
                  parser=DEFAULT_PARSER,
                  ignorefiles=None,
+                 clobber=True,
                  max_path_part_len=None,
                  gzip_courses=False,
                  wk_filter=None):
@@ -64,6 +66,7 @@ class CourseraDownloader(object):
         # if there is one, and filter out empty tokens.
         self.ignorefiles = [x.strip()[1:] if x[0] == '.' else x.strip()
                             for x in ignorefiles.split(',') if len(x)]
+        self.clobber = clobber
 
         self.session = None
         self.proxy = proxy
@@ -96,7 +99,7 @@ class CourseraDownloader(object):
             raise Exception("Failed to find csrf cookie")
 
         # call the authenticator url
-        LOGIN_FORM = {'email': self.username, 'password': self.password}
+        LOGIN_FORM = {'email': self.username, 'password': self.password, 'webrequest':'true'}
         s.headers['Referer'] = 'https://www.coursera.org'
         s.headers['X-CSRFToken'] = s.cookies.get('csrf_token')
         s.cookies['csrftoken'] = s.cookies.get('csrf_token')
@@ -320,7 +323,8 @@ class CourseraDownloader(object):
 
         dl = True
         if path.exists(filepath):
-            if clen > 0:
+            if not self.clobber: print_('    - skipping "%s" (already exists, --no-clobber)' % fname)
+            if self.clobber and clen > 0:
                 fs = path.getsize(filepath)
                 delta = math.fabs(clen - fs)
 
@@ -582,6 +586,7 @@ def main():
         help="the html parser to use, see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser")
     parser.add_argument("-x", dest='proxy', type=str,
                         default=None, help="proxy to use, e.g., foo.bar.com:3125")
+    parser.add_argument("--no-clobber", dest='clobber', default=True, action="store_false", help="Don't re-download existing files")
     parser.add_argument(
         "--reverse-sections", dest='reverse', action="store_true",
         default=False, help="download and save the sections in reverse order")
@@ -592,7 +597,7 @@ def main():
     parser.add_argument("-mppl", dest='mppl', type=int, default=100,
                         help='Maximum length of filenames/dirs in a path (windows only)')
     parser.add_argument("-w", dest='wkfilter', type=str, default=None,
-                        help="Comma separted list of week numbers to download e.g., 1,3,8")
+                        help="Comma separted list of sequence/lesson/week numbers to download e.g., 1,3,8")
     args = parser.parse_args()
 
     # check the parser
@@ -639,6 +644,7 @@ def main():
         proxy=args.proxy,
         parser=html_parser,
         ignorefiles=args.ignorefiles,
+        clobber=args.clobber,
         max_path_part_len=mppl,
         gzip_courses=args.gzip_courses,
         wk_filter=args.wkfilter
